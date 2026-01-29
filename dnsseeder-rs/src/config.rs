@@ -513,6 +513,9 @@ fn normalize_address(addr: &str, default_port: &str) -> String {
     if has_explicit_port(addr) {
         return addr.to_string();
     }
+    if addr.starts_with('[') && addr.ends_with(']') {
+        return format!("{}:{}", addr, default_port);
+    }
     if addr.contains(':') {
         return format!("[{}]:{}", addr, default_port);
     }
@@ -620,5 +623,34 @@ pub(crate) fn devnet_params() -> NetworkParams {
         default_port: "16611".to_string(),
         dns_seeds: vec![],
         accept_unroutable: true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_address_appends_port_for_bracketed_ipv6() {
+        let addr = normalize_address("[::1]", "5354");
+        assert_eq!(addr, "[::1]:5354");
+    }
+
+    #[test]
+    fn normalize_address_brackets_unbracketed_ipv6() {
+        let addr = normalize_address("::1", "5354");
+        assert_eq!(addr, "[::1]:5354");
+    }
+
+    #[test]
+    fn normalize_address_leaves_explicit_port() {
+        let addr = normalize_address("[::1]:53", "5354");
+        assert_eq!(addr, "[::1]:53");
+    }
+
+    #[test]
+    fn normalize_address_ipv4_adds_port() {
+        let addr = normalize_address("127.0.0.1", "5354");
+        assert_eq!(addr, "127.0.0.1:5354");
     }
 }
