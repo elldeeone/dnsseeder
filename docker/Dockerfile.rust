@@ -1,0 +1,25 @@
+# -- multistage docker build: stage #1: build stage
+FROM rust:1.78-bullseye AS build
+
+RUN apt-get update && apt-get install -y --no-install-recommends protobuf-compiler ca-certificates && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY dnsseeder-rs/Cargo.toml dnsseeder-rs/Cargo.lock ./dnsseeder-rs/
+COPY dnsseeder-rs/build.rs ./dnsseeder-rs/
+COPY dnsseeder-rs/proto ./dnsseeder-rs/proto
+COPY dnsseeder-rs/src ./dnsseeder-rs/src
+
+WORKDIR /app/dnsseeder-rs
+
+RUN cargo build --release
+
+# --- multistage docker build: stage #2: runtime image
+FROM debian:bookworm-slim
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /app/dnsseeder-rs/target/release/dnsseeder /app/dnsseeder
+
+ENTRYPOINT ["/app/dnsseeder"]

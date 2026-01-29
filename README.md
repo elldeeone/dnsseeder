@@ -18,7 +18,8 @@ disk in a json file, so on subsequent start ups the kaspad node specified with
 When DNSSeeder is queried for node information, it responds with details of a
 random selection of the reliable nodes it knows about.
 
-It is written in Go (golang).
+It is written in Go (golang). A Rust implementation lives in `dnsseeder-rs/` and
+is intended to be a practical drop-in replacement.
 
 This project is currently under active development and is in Beta state.
 
@@ -26,6 +27,7 @@ This project is currently under active development and is in Beta state.
 ## Requirements
 
 Latest version of [Go](http://golang.org) (currently 1.17)
+and a recent Rust toolchain for the Rust implementation.
 
 ## Getting Started
 
@@ -65,6 +67,29 @@ To start dnsseeder listening on udp 127.0.0.1:5354 with an initial connection to
 $ ./dnsseeder -n nameserver.example.com -H network-seed.example.com -s 127.0.0.1 --testnet
 ```
 
+### Rust build/run
+
+```
+$ cd dnsseeder-rs
+$ cargo build
+$ cargo test
+$ cargo run -- -n nameserver.example.com -H network-seed.example.com -s 127.0.0.1 --testnet
+```
+
+The Rust binary supports the same CLI flags and default paths as the Go version.
+The `nodes.json` file format is compatible and stored under the same network-specific
+app directory.
+
+Known deltas:
+- `--profile` is accepted but currently logs a warning instead of starting a pprof server.
+
+### Docker
+
+- Go:
+  - `docker build -f docker/Dockerfile -t dnsseeder .`
+- Rust:
+  - `docker build -f docker/Dockerfile.rust -t dnsseeder-rs .`
+
 You will then need to redirect DNS traffic on your public IP port 53 to 127.0.0.1:5354
 Note: to listen directly on port 53 on most Unix systems, one has to run dnsseeder as root, which is discouraged
 
@@ -77,4 +102,3 @@ NAME                        TYPE        VALUE
 [your.domain.name]          A           [your ip address]
 [ns-your.domain.name]       NS          [your.domain.name]
 ```
-
