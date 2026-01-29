@@ -309,10 +309,7 @@ mod tests {
         msg.set_message_type(MessageType::Query);
         let name = Name::from_ascii("foo.seed.example.com.evil").unwrap();
         msg.add_query(Query::query(name, RecordType::A));
-        let resp = server.handle_request(
-            "127.0.0.1:9999".parse().unwrap(),
-            &msg.to_vec().unwrap(),
-        );
+        let resp = server.handle_request("127.0.0.1:9999".parse().unwrap(), &msg.to_vec().unwrap());
         assert!(resp.is_some());
     }
 }

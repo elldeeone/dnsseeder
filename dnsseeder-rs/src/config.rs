@@ -665,10 +665,7 @@ mod tests {
             "/tmp/base/App"
         };
         let expanded = clean_and_expand_path("~/data", default_app_dir);
-        let expected = Path::new(default_app_dir)
-            .parent()
-            .unwrap()
-            .join("data");
+        let expected = Path::new(default_app_dir).parent().unwrap().join("data");
         assert_eq!(Path::new(&expanded), expected);
     }
 }

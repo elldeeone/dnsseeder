@@ -66,10 +66,7 @@ impl PeerService for PeerServiceImpl {
         let subnetwork_id = if req.subnetwork_id.is_empty() {
             None
         } else {
-            Some(
-                SubnetworkID::from_bytes(&req.subnetwork_id)
-                    .map_err(tonic::Status::unknown)?,
-            )
+            Some(SubnetworkID::from_bytes(&req.subnetwork_id).map_err(tonic::Status::unknown)?)
         };
         let mut addrs = self.manager.good_addresses(
             hickory_proto::rr::RecordType::A,

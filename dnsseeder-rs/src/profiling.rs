@@ -7,11 +7,11 @@ use hyper_util::rt::TokioIo;
 use log::{error, info};
 use pprof::ProfilerGuard;
 use protobuf::Message;
+#[cfg(test)]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
-#[cfg(test)]
-use std::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(test)]
 static PROFILE_STUB: AtomicBool = AtomicBool::new(false);
@@ -68,7 +68,10 @@ impl ProfileServer {
 
 async fn handle_request(req: Request<Incoming>) -> Result<Response<Full<Bytes>>, hyper::Error> {
     if req.method() != Method::GET {
-        return Ok(simple_response(StatusCode::METHOD_NOT_ALLOWED, "method not allowed"));
+        return Ok(simple_response(
+            StatusCode::METHOD_NOT_ALLOWED,
+            "method not allowed",
+        ));
     }
 
     let path = req.uri().path();
@@ -163,10 +166,10 @@ fn parse_profile_seconds(query: Option<&str>) -> Option<u64> {
         let mut parts = pair.splitn(2, '=');
         let key = parts.next()?;
         let value = parts.next().unwrap_or("");
-        if key == "seconds" {
-            if let Ok(secs) = value.parse::<u64>() {
-                return Some(secs);
-            }
+        if key == "seconds"
+            && let Ok(secs) = value.parse::<u64>()
+        {
+            return Some(secs);
         }
     }
     None
