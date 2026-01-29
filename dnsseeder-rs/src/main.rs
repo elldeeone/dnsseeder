@@ -22,7 +22,7 @@ use kaspa_p2p_lib::pb::kaspad_message::Payload;
 use kaspa_p2p_lib::{KaspadMessagePayloadType, make_message};
 use log::{debug, error, info, warn};
 use once_cell::sync::Lazy;
-use std::net::{IpAddr, ToSocketAddrs};
+use std::net::{IpAddr, Ipv6Addr, ToSocketAddrs};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::watch;
@@ -47,7 +47,13 @@ async fn run() -> Result<(), String> {
     info!("Version {}", version::version());
 
     let profile_server = if !cfg.profile.is_empty() {
-        Some(profiling::start(&cfg.profile).await?)
+        match profiling::start(&cfg.profile).await {
+            Ok(server) => Some(server),
+            Err(err) => {
+                error!("Failed to start profile server on {}: {}", cfg.profile, err);
+                None
+            }
+        }
     } else {
         None
     };
@@ -302,7 +308,11 @@ fn proto_to_net_address(addr: &kaspa_p2p_lib::pb::NetAddress) -> Option<NetAddre
         16 => {
             let mut octets = [0u8; 16];
             octets.copy_from_slice(&addr.ip);
-            IpAddr::V6(std::net::Ipv6Addr::from(octets))
+            let ipv6 = Ipv6Addr::from(octets);
+            match ipv6.to_ipv4() {
+                Some(ipv4) => IpAddr::V4(ipv4),
+                None => IpAddr::V6(ipv6),
+            }
         }
         _ => return None,
     };
