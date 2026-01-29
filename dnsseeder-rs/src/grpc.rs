@@ -87,7 +87,7 @@ impl PeerService for PeerServiceImpl {
 
 fn net_address_to_proto(addr: NetAddress) -> pb::NetAddress {
     let ip_bytes = match addr.ip {
-        std::net::IpAddr::V4(v4) => v4.octets().to_vec(),
+        std::net::IpAddr::V4(v4) => v4.to_ipv6_mapped().octets().to_vec(),
         std::net::IpAddr::V6(v6) => v6.octets().to_vec(),
     };
     pb::NetAddress {
@@ -163,7 +163,12 @@ mod tests {
             include_all_subnetworks: false,
         };
         let resp = client.get_peers_list(req).await.unwrap();
-        assert!(!resp.into_inner().addresses.is_empty());
+        let result = resp.into_inner();
+        assert!(!result.addresses.is_empty());
+        let ip_bytes = &result.addresses[0].ip;
+        assert_eq!(ip_bytes.len(), 16);
+        assert_eq!(&ip_bytes[0..12], &[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255]);
+        assert_eq!(&ip_bytes[12..16], &[203, 105, 20, 21]);
 
         let _ = tx.send(());
         let _ = handle.await;
