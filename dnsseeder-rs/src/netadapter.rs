@@ -135,9 +135,14 @@ impl Routes {
         expected: KaspadMessagePayloadType,
         timeout: Duration,
     ) -> Result<kaspa_p2p_lib::pb::KaspadMessage, ProtocolError> {
+        let deadline = tokio::time::Instant::now() + timeout;
         let route = self.choose_route(expected);
         loop {
-            let msg = tokio::time::timeout(timeout, route.recv())
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                return Err(ProtocolError::Timeout(timeout));
+            }
+            let msg = tokio::time::timeout(remaining, route.recv())
                 .await
                 .map_err(|_| ProtocolError::Timeout(timeout))?;
             let msg = msg.ok_or(ProtocolError::ConnectionClosed)?;

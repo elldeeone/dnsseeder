@@ -20,13 +20,17 @@ pub async fn start(manager: Arc<Manager>, listen: &str) -> Result<GrpcServer, St
     let addr: SocketAddr = addrs
         .next()
         .ok_or_else(|| "no resolved addresses".to_string())?;
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .map_err(|e| e.to_string())?;
     let (tx, rx) = tokio::sync::oneshot::channel::<()>();
     let service = PeerServiceImpl { manager };
     let handle = tokio::spawn(async move {
         let server =
             tonic::transport::Server::builder().add_service(PeerServiceServer::new(service));
+        let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
         if let Err(err) = server
-            .serve_with_shutdown(addr, async {
+            .serve_with_incoming_shutdown(incoming, async {
                 let _ = rx.await;
             })
             .await
