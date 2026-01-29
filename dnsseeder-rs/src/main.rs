@@ -66,36 +66,35 @@ async fn run() -> Result<(), String> {
     let manager = Manager::new(&cfg.app_dir)?;
     let manager_handle = manager.start_background();
 
+    let mut disable_creep = false;
     if !cfg.known_peers.is_empty() {
-        let mut peers = Vec::new();
-        for raw in cfg.known_peers.split(',') {
-            let parts: Vec<&str> = raw.split(':').collect();
-            if parts.len() != 2 {
-                return Err(format!(
-                    "Invalid peer address: {}; addresses should be in format \"IP\":\"port\"",
-                    raw
-                ));
+        match parse_known_peers(&cfg.known_peers) {
+            Ok(peers) => {
+                manager.add_addresses(&peers);
+                for peer in peers {
+                    manager.attempt(&peer);
+                    manager.good(&peer, None, None);
+                }
             }
-            let ip: IpAddr = parts[0]
-                .parse()
-                .map_err(|_| format!("Invalid peer IP address: {}", parts[0]))?;
-            let port: u16 = parts[1]
-                .parse()
-                .map_err(|_| format!("Invalid peer port: {}", parts[1]))?;
-            peers.push(NetAddress::new(ip, port));
-        }
-        manager.add_addresses(&peers);
-        for peer in peers {
-            manager.attempt(&peer);
-            manager.good(&peer, None, None);
+            Err(err) => {
+                error!("{}", err);
+                disable_creep = true;
+            }
         }
     }
 
-    if !cfg.seeder.is_empty()
-        && let Some(addr) = resolve_seeder(&cfg.seeder, default_port).await
-    {
-        manager.add_addresses(std::slice::from_ref(&addr));
-        *DEFAULT_SEEDER.lock() = Some(addr);
+    if !cfg.seeder.is_empty() {
+        match resolve_seeder(&cfg.seeder, default_port).await {
+            Ok(Some(addr)) => {
+                manager.add_addresses(std::slice::from_ref(&addr));
+                *DEFAULT_SEEDER.lock() = Some(addr);
+            }
+            Ok(None) => {}
+            Err(err) => {
+                error!("{}", err);
+                return Ok(());
+            }
+        }
     }
 
     let cfg_arc = Arc::new(cfg);
@@ -105,13 +104,15 @@ async fn run() -> Result<(), String> {
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
-    let creep_handle = {
+    let creep_handle = if disable_creep {
+        None
+    } else {
         let manager = manager.clone();
         let cfg = cfg_arc.clone();
         let adapters = net_adapters.clone();
-        tokio::spawn(async move {
+        Some(tokio::spawn(async move {
             creep(manager, cfg, adapters, shutdown_rx).await;
-        })
+        }))
     };
 
     let dns_handle = {
@@ -134,7 +135,9 @@ async fn run() -> Result<(), String> {
     let _ = shutdown_tx.send(true);
     manager.shutdown().await;
     grpc_server.stop().await;
-    let _ = creep_handle.await;
+    if let Some(handle) = creep_handle {
+        let _ = handle.await;
+    }
     let _ = dns_handle.await;
     let _ = manager_handle.await;
     info!("Seeder shutdown complete");
@@ -320,36 +323,72 @@ async fn wait_for_shutdown_signal() {
     }
 }
 
-fn split_host_port(input: &str) -> Option<(String, u16)> {
+fn parse_known_peers(peers: &str) -> Result<Vec<NetAddress>, String> {
+    let mut out = Vec::new();
+    for raw in peers.split(',') {
+        let parts: Vec<&str> = raw.split(':').collect();
+        if parts.len() != 2 {
+            return Err(format!(
+                "Invalid peer address: {}; addresses should be in format \"IP\":\"port\"",
+                raw
+            ));
+        }
+        let ip: IpAddr = parts[0]
+            .parse()
+            .map_err(|_| format!("Invalid peer IP address: {}", parts[0]))?;
+        let port: i64 = parts[1]
+            .parse()
+            .map_err(|_| format!("Invalid peer port: {}", parts[1]))?;
+        out.push(NetAddress::new(ip, port as u16));
+    }
+    Ok(out)
+}
+
+fn split_host_port(input: &str) -> Result<Option<(String, u16)>, String> {
     if let Some(rest) = input.strip_prefix('[') {
-        let end = rest.find(']')?;
+        let end = match rest.find(']') {
+            Some(end) => end,
+            None => return Ok(None),
+        };
         let host = &rest[..end];
-        let port = rest[end + 1..].strip_prefix(':')?;
-        let port = port.parse::<u16>().ok()?;
-        return Some((host.to_string(), port));
+        let after = &rest[end + 1..];
+        if let Some(port_str) = after.strip_prefix(':') {
+            let port = port_str
+                .parse::<i64>()
+                .map_err(|_| format!("Invalid seeder port: {}", port_str))?;
+            return Ok(Some((host.to_string(), port as u16)));
+        }
+        return Ok(None);
     }
 
     if input.matches(':').count() == 1 {
-        let (host, port) = input.rsplit_once(':')?;
-        let port = port.parse::<u16>().ok()?;
-        return Some((host.to_string(), port));
+        let (host, port_str) = match input.rsplit_once(':') {
+            Some(value) => value,
+            None => return Ok(None),
+        };
+        let port = port_str
+            .parse::<i64>()
+            .map_err(|_| format!("Invalid seeder port: {}", port_str))?;
+        return Ok(Some((host.to_string(), port as u16)));
     }
-    None
+    Ok(None)
 }
 
-async fn resolve_seeder(seeder: &str, default_port: u16) -> Option<NetAddress> {
-    let (host, port) =
-        split_host_port(seeder).unwrap_or_else(|| (seeder.to_string(), default_port));
+async fn resolve_seeder(seeder: &str, default_port: u16) -> Result<Option<NetAddress>, String> {
+    let (host, port) = match split_host_port(seeder)? {
+        Some(value) => value,
+        None => (seeder.to_string(), default_port),
+    };
 
     if let Ok(ip) = host.parse::<IpAddr>() {
-        return Some(NetAddress::new(ip, port));
+        return Ok(Some(NetAddress::new(ip, port)));
     }
 
     match lookup_host(&host).await {
-        Ok(ip) => Some(NetAddress::new(ip, port)),
+        Ok(ip) => Ok(Some(NetAddress::new(ip, port))),
         Err(err) => {
             warn!("Failed to resolve seed host: {}, {}, ignoring", host, err);
-            None
+            Ok(None)
         }
     }
 }

@@ -35,13 +35,29 @@ pub fn init(
 
 fn level_from_string(level: &str) -> Result<LevelFilter, String> {
     match level.to_lowercase().as_str() {
-        "trace" => Ok(LevelFilter::Trace),
-        "debug" => Ok(LevelFilter::Debug),
-        "info" => Ok(LevelFilter::Info),
-        "warn" | "warning" => Ok(LevelFilter::Warn),
-        "error" => Ok(LevelFilter::Error),
-        "critical" => Ok(LevelFilter::Error),
+        "trace" | "trc" => Ok(LevelFilter::Trace),
+        "debug" | "dbg" => Ok(LevelFilter::Debug),
+        "info" | "inf" => Ok(LevelFilter::Info),
+        "warn" | "warning" | "wrn" => Ok(LevelFilter::Warn),
+        "error" | "err" => Ok(LevelFilter::Error),
+        "critical" | "crt" => Ok(LevelFilter::Error),
         "off" => Ok(LevelFilter::Off),
         _ => Err(format!("Invalid loglevel: {}", level)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::level_from_string;
+    use log::LevelFilter;
+
+    #[test]
+    fn level_from_string_accepts_shorthand() {
+        assert_eq!(level_from_string("trc").unwrap(), LevelFilter::Trace);
+        assert_eq!(level_from_string("dbg").unwrap(), LevelFilter::Debug);
+        assert_eq!(level_from_string("inf").unwrap(), LevelFilter::Info);
+        assert_eq!(level_from_string("wrn").unwrap(), LevelFilter::Warn);
+        assert_eq!(level_from_string("err").unwrap(), LevelFilter::Error);
+        assert_eq!(level_from_string("crt").unwrap(), LevelFilter::Error);
     }
 }

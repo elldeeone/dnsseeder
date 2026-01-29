@@ -420,6 +420,7 @@ fn parse_ipv6(s: &str) -> Ipv6Addr {
 mod tests {
     use super::*;
     use crate::config::{NetworkFlags, set_active_config, set_peers_default_port};
+    use serde_json::json;
 
     fn init_config() {
         let _ = set_active_config(crate::config::Config {
@@ -459,5 +460,34 @@ mod tests {
         manager.good(&addr, Some("ua".to_string()), None);
         let addrs = manager.good_addresses(hickory_proto::rr::RecordType::A, true, None);
         assert_eq!(addrs.len(), 1);
+    }
+
+    #[test]
+    fn test_nodes_json_format_matches_go() {
+        init_config();
+        let addr = NetAddress::with_timestamp(IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)), 16111, 0);
+        let node = Node {
+            addr: addr.clone(),
+            user_agent: None,
+            last_attempt: GoTime::zero(),
+            last_success: GoTime::zero(),
+            last_seen: GoTime::zero(),
+            subnetwork_id: None,
+        };
+        let mut map = HashMap::new();
+        map.insert("1.2.3.4_16111".to_string(), node);
+
+        let value = serde_json::to_value(&map).unwrap();
+        let expected = json!({
+            "1.2.3.4_16111": {
+                "Addr": {"Timestamp": {}, "IP": "1.2.3.4", "Port": 16111},
+                "UserAgent": null,
+                "LastAttempt": "0001-01-01T00:00:00Z",
+                "LastSuccess": "0001-01-01T00:00:00Z",
+                "LastSeen": "0001-01-01T00:00:00Z",
+                "SubnetworkID": null
+            }
+        });
+        assert_eq!(value, expected);
     }
 }

@@ -472,8 +472,11 @@ fn parse_u16(value: &str, name: &str) -> Result<u16, String> {
 fn clean_and_expand_path(path: &str, default_app_dir: &str) -> String {
     let mut expanded = path.to_string();
     if let Some(stripped) = expanded.strip_prefix('~') {
-        let home = home_dir().unwrap_or_else(|| PathBuf::from(default_app_dir));
-        expanded = home
+        let base_dir = Path::new(default_app_dir)
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from(default_app_dir));
+        expanded = base_dir
             .join(stripped.trim_start_matches('/'))
             .to_string_lossy()
             .to_string();
@@ -652,5 +655,20 @@ mod tests {
     fn normalize_address_ipv4_adds_port() {
         let addr = normalize_address("127.0.0.1", "5354");
         assert_eq!(addr, "127.0.0.1:5354");
+    }
+
+    #[test]
+    fn clean_and_expand_path_uses_parent_of_default_app_dir_for_tilde() {
+        let default_app_dir = if cfg!(windows) {
+            r"C:\base\App"
+        } else {
+            "/tmp/base/App"
+        };
+        let expanded = clean_and_expand_path("~/data", default_app_dir);
+        let expected = Path::new(default_app_dir)
+            .parent()
+            .unwrap()
+            .join("data");
+        assert_eq!(Path::new(&expanded), expected);
     }
 }

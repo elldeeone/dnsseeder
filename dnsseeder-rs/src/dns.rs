@@ -4,7 +4,7 @@ use hickory_proto::op::{Message, MessageType};
 use hickory_proto::rr::rdata::{A, AAAA, NS};
 use hickory_proto::rr::{Name, RData, Record, RecordType};
 use log::info;
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
 use tokio::net::UdpSocket;
 use tokio::time::{Duration, timeout};
@@ -40,7 +40,11 @@ impl DnsServer {
         self: Arc<Self>,
         shutdown: tokio::sync::watch::Receiver<bool>,
     ) -> Result<(), String> {
-        let socket = UdpSocket::bind(&self.listen)
+        let mut addrs = self.listen.to_socket_addrs().map_err(|e| e.to_string())?;
+        let listen_addr = addrs
+            .find(|addr| matches!(addr, SocketAddr::V4(_)))
+            .ok_or_else(|| "no IPv4 address resolved".to_string())?;
+        let socket = UdpSocket::bind(listen_addr)
             .await
             .map_err(|e| e.to_string())?;
         let socket = Arc::new(socket);
@@ -80,7 +84,7 @@ impl DnsServer {
         }
         let query = req.queries()[0].clone();
         let qname = query.name().to_utf8().to_lowercase();
-        if !qname.ends_with(&self.hostname) {
+        if !qname.contains(&self.hostname) {
             info!("{}: invalid name: {}", addr, query.name());
             return None;
         }
@@ -115,7 +119,7 @@ impl DnsServer {
         resp.add_query(query.clone());
 
         if qtype != RecordType::NS {
-            let ns = self.build_ns_record(query.name());
+            let ns = self.build_authority_record();
             resp.add_name_server(ns);
             let mut addrs =
                 self.manager
@@ -165,6 +169,11 @@ impl DnsServer {
         let name: Name = self.nameserver.parse().unwrap_or_else(|_| Name::new());
         record.set_data(Some(RData::NS(NS(name))));
         record
+    }
+
+    fn build_authority_record(&self) -> Record {
+        let name: Name = self.hostname.parse().unwrap_or_else(|_| Name::new());
+        self.build_ns_record(&name)
     }
 }
 
@@ -247,5 +256,63 @@ mod tests {
             .unwrap();
         let parsed = Message::from_vec(&resp).unwrap();
         assert_eq!(parsed.answers().len(), 1);
+    }
+
+    #[test]
+    fn test_dns_authority_uses_base_hostname() {
+        init_config();
+        let manager = Manager::new(".").unwrap();
+        let addr = NetAddress::new(IpAddr::V4(Ipv4Addr::new(5, 6, 7, 8)), 16111);
+        manager.add_addresses(std::slice::from_ref(&addr));
+        manager.good(&addr, None, None);
+        let server = DnsServer::new(
+            "seed.example.com",
+            "ns.example.com",
+            "127.0.0.1:5354",
+            manager,
+        );
+
+        let mut msg = Message::new();
+        msg.set_id(2);
+        msg.set_message_type(MessageType::Query);
+        let name = Name::from_ascii("n.seed.example.com").unwrap();
+        msg.add_query(Query::query(name, RecordType::A));
+        let resp = server
+            .handle_request("127.0.0.1:9999".parse().unwrap(), &msg.to_vec().unwrap())
+            .unwrap();
+        let parsed = Message::from_vec(&resp).unwrap();
+        let ns = parsed.name_servers();
+        assert_eq!(ns.len(), 1);
+        let mut ns_name = ns[0].name().to_utf8().to_lowercase();
+        if !ns_name.ends_with('.') {
+            ns_name.push('.');
+        }
+        assert_eq!(ns_name, "seed.example.com.");
+    }
+
+    #[test]
+    fn test_dns_accepts_hostname_substring() {
+        init_config();
+        let manager = Manager::new(".").unwrap();
+        let addr = NetAddress::new(IpAddr::V4(Ipv4Addr::new(9, 9, 9, 9)), 16111);
+        manager.add_addresses(std::slice::from_ref(&addr));
+        manager.good(&addr, None, None);
+        let server = DnsServer::new(
+            "seed.example.com",
+            "ns.example.com",
+            "127.0.0.1:5354",
+            manager,
+        );
+
+        let mut msg = Message::new();
+        msg.set_id(3);
+        msg.set_message_type(MessageType::Query);
+        let name = Name::from_ascii("foo.seed.example.com.evil").unwrap();
+        msg.add_query(Query::query(name, RecordType::A));
+        let resp = server.handle_request(
+            "127.0.0.1:9999".parse().unwrap(),
+            &msg.to_vec().unwrap(),
+        );
+        assert!(resp.is_some());
     }
 }

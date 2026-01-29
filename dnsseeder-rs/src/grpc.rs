@@ -68,7 +68,7 @@ impl PeerService for PeerServiceImpl {
         } else {
             Some(
                 SubnetworkID::from_bytes(&req.subnetwork_id)
-                    .map_err(tonic::Status::invalid_argument)?,
+                    .map_err(tonic::Status::unknown)?,
             )
         };
         let mut addrs = self.manager.good_addresses(
@@ -106,6 +106,7 @@ mod tests {
     use crate::config::{NetworkFlags, set_active_config, set_peers_default_port};
     use crate::types::NetAddress;
     use std::net::{IpAddr, Ipv4Addr};
+    use tonic::Code;
 
     #[tokio::test]
     async fn test_get_peers() {
@@ -166,6 +167,70 @@ mod tests {
         };
         let resp = client.get_peers_list(req).await.unwrap();
         assert!(!resp.into_inner().addresses.is_empty());
+
+        let _ = tx.send(());
+        let _ = handle.await;
+    }
+
+    #[tokio::test]
+    async fn test_get_peers_invalid_subnetwork_id() {
+        let _ = set_active_config(crate::config::Config {
+            app_dir: ".".to_string(),
+            known_peers: String::new(),
+            show_version: false,
+            host: "seed.example.com".to_string(),
+            listen: "127.0.0.1:5354".to_string(),
+            nameserver: "ns.example.com".to_string(),
+            seeder: String::new(),
+            profile: String::new(),
+            grpc_listen: "127.0.0.1:3737".to_string(),
+            min_proto_ver: 0,
+            min_ua_ver: String::new(),
+            net_suffix: 0,
+            no_log_files: true,
+            log_level: "info".to_string(),
+            threads: 8,
+            network: NetworkFlags {
+                testnet: false,
+                simnet: false,
+                devnet: false,
+                override_dag_params_file: None,
+                active_net_params: crate::config::mainnet_params(),
+            },
+        });
+        set_peers_default_port(16111);
+
+        let manager = Manager::new(".").unwrap();
+        let addr = NetAddress::new(IpAddr::V4(Ipv4Addr::new(203, 105, 20, 21)), 16111);
+        manager.add_addresses(std::slice::from_ref(&addr));
+        manager.good(&addr, None, None);
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        let service = PeerServiceImpl { manager };
+        let handle = tokio::spawn(async move {
+            let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
+            let server =
+                tonic::transport::Server::builder().add_service(PeerServiceServer::new(service));
+            server
+                .serve_with_incoming_shutdown(incoming, async {
+                    let _ = rx.await;
+                })
+                .await
+                .unwrap();
+        });
+
+        let endpoint = format!("http://{}", addr);
+        let mut client = pb::peer_service_client::PeerServiceClient::connect(endpoint)
+            .await
+            .unwrap();
+        let req = pb::GetPeersListRequest {
+            subnetwork_id: vec![1, 2, 3],
+            include_all_subnetworks: false,
+        };
+        let status = client.get_peers_list(req).await.unwrap_err();
+        assert_eq!(status.code(), Code::Unknown);
 
         let _ = tx.send(());
         let _ = handle.await;
