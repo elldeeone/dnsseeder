@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::version;
-use kaspa_p2p_lib::common::ProtocolError;
+use kaspa_p2p_lib::common::{DEFAULT_TIMEOUT, ProtocolError};
 use kaspa_p2p_lib::pb::kaspad_message::Payload;
 use kaspa_p2p_lib::pb::{
     AddressesMessage, ReadyMessage, RequestAddressesMessage, VerackMessage, VersionMessage,
@@ -204,7 +204,7 @@ async fn perform_handshake(
     routes.enqueue(ready).await?;
 
     let version_msg = routes
-        .wait_for_message(KaspadMessagePayloadType::Version, Duration::from_secs(4))
+        .wait_for_message(KaspadMessagePayloadType::Version, DEFAULT_TIMEOUT)
         .await?;
     let peer_version = match version_msg.payload {
         Some(Payload::Version(v)) => v,
@@ -227,17 +227,14 @@ async fn perform_handshake(
         .await?;
 
     routes
-        .wait_for_message(KaspadMessagePayloadType::Verack, Duration::from_secs(4))
+        .wait_for_message(KaspadMessagePayloadType::Verack, DEFAULT_TIMEOUT)
         .await?;
     routes
         .enqueue(make_message!(Payload::Verack, VerackMessage {}))
         .await?;
 
     routes
-        .wait_for_message(
-            KaspadMessagePayloadType::RequestAddresses,
-            Duration::from_secs(4),
-        )
+        .wait_for_message(KaspadMessagePayloadType::RequestAddresses, DEFAULT_TIMEOUT)
         .await?;
     routes
         .enqueue(make_message!(
@@ -259,7 +256,7 @@ async fn perform_handshake(
         .await?;
 
     routes
-        .wait_for_message(KaspadMessagePayloadType::Addresses, Duration::from_secs(4))
+        .wait_for_message(KaspadMessagePayloadType::Addresses, DEFAULT_TIMEOUT)
         .await?;
 
     debug!("Handshake completed with peer {}", routes.router);

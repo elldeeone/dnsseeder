@@ -510,13 +510,30 @@ fn create_path_if_needed(path: &str) -> Result<(), String> {
 }
 
 fn normalize_address(addr: &str, default_port: &str) -> String {
-    if addr.parse::<std::net::SocketAddr>().is_ok() {
+    if has_explicit_port(addr) {
         return addr.to_string();
     }
-    if addr.contains(':') && !addr.contains(']') {
+    if addr.contains(':') {
         return format!("[{}]:{}", addr, default_port);
     }
     format!("{}:{}", addr, default_port)
+}
+
+fn has_explicit_port(addr: &str) -> bool {
+    if let Some(rest) = addr.strip_prefix('[') {
+        if let Some(end) = rest.find(']') {
+            let after = &rest[end + 1..];
+            return after.starts_with(':') && after.len() > 1;
+        }
+        return false;
+    }
+
+    if addr.matches(':').count() == 1
+        && let Some((_, port)) = addr.rsplit_once(':')
+    {
+        return !port.is_empty();
+    }
+    false
 }
 
 fn default_app_dir(app_name: &str) -> String {

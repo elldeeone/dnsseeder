@@ -1,7 +1,7 @@
 use crate::manager::Manager;
 use crate::types::{NetAddress, SubnetworkID};
 use log::error;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
 
 pub mod pb {
@@ -16,7 +16,10 @@ pub struct GrpcServer {
 }
 
 pub async fn start(manager: Arc<Manager>, listen: &str) -> Result<GrpcServer, String> {
-    let addr: SocketAddr = listen.parse::<SocketAddr>().map_err(|e| e.to_string())?;
+    let mut addrs = listen.to_socket_addrs().map_err(|e| e.to_string())?;
+    let addr: SocketAddr = addrs
+        .next()
+        .ok_or_else(|| "no resolved addresses".to_string())?;
     let (tx, rx) = tokio::sync::oneshot::channel::<()>();
     let service = PeerServiceImpl { manager };
     let handle = tokio::spawn(async move {

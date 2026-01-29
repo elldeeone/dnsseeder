@@ -13,7 +13,7 @@ use crate::checkversion::check_version;
 use crate::config::{log_paths, set_active_config, set_peers_default_port};
 use crate::dns::DnsServer;
 use crate::manager::Manager;
-use crate::netadapter::DnsseedNetAdapter;
+use crate::netadapter::{DnsseedNetAdapter, Routes};
 use crate::types::NetAddress;
 use kaspa_p2p_lib::common::DEFAULT_TIMEOUT;
 use kaspa_p2p_lib::pb::RequestAddressesMessage;
@@ -204,11 +204,34 @@ async fn poll_peer(
     debug!("Polling peer {}", peer_address);
     let mut routes = adapter.connect(&peer_address).await?;
     let peer_version = routes.peer_version.clone();
+    let result = poll_peer_connected(
+        &mut routes,
+        manager,
+        cfg,
+        addr,
+        &peer_address,
+        &peer_version,
+    )
+    .await;
+    routes.disconnect().await;
+    result
+}
 
+async fn poll_peer_connected(
+    routes: &mut Routes,
+    manager: &Manager,
+    cfg: &config::Config,
+    addr: &NetAddress,
+    peer_address: &str,
+    peer_version: &kaspa_p2p_lib::pb::VersionMessage,
+) -> Result<(), String> {
     if cfg.min_proto_ver > 0 && peer_version.protocol_version < cfg.min_proto_ver as u32 {
         return Err(format!(
             "Peer {} ({}) protocol version {} is below minimum: {}",
-            peer_address, peer_version.user_agent, peer_version.protocol_version, cfg.min_proto_ver
+            peer_address,
+            peer_version.user_agent.as_str(),
+            peer_version.protocol_version,
+            cfg.min_proto_ver
         ));
     }
 
@@ -240,7 +263,7 @@ async fn poll_peer(
     info!(
         "Peer {} ({}) sent {} addresses, {} new",
         peer_address,
-        peer_version.user_agent,
+        peer_version.user_agent.as_str(),
         addrs.len(),
         added
     );
@@ -249,12 +272,13 @@ async fn poll_peer(
         check_version(&cfg.min_ua_ver, &peer_version.user_agent).map_err(|_| {
             format!(
                 "Peer {} version {} doesn't satisfy minimum: {}",
-                peer_address, peer_version.user_agent, cfg.min_ua_ver
+                peer_address,
+                peer_version.user_agent.as_str(),
+                cfg.min_ua_ver
             )
         })?;
     }
-    manager.good(addr, Some(peer_version.user_agent), None);
-    routes.disconnect().await;
+    manager.good(addr, Some(peer_version.user_agent.clone()), None);
     Ok(())
 }
 
@@ -296,16 +320,26 @@ async fn wait_for_shutdown_signal() {
     }
 }
 
-async fn resolve_seeder(seeder: &str, default_port: u16) -> Option<NetAddress> {
-    let mut host = seeder.to_string();
-    let mut port = default_port;
-    if seeder.matches(':').count() == 1
-        && let Some((h, p)) = seeder.rsplit_once(':')
-        && let Ok(parsed_port) = p.parse::<u16>()
-    {
-        host = h.to_string();
-        port = parsed_port;
+fn split_host_port(input: &str) -> Option<(String, u16)> {
+    if let Some(rest) = input.strip_prefix('[') {
+        let end = rest.find(']')?;
+        let host = &rest[..end];
+        let port = rest[end + 1..].strip_prefix(':')?;
+        let port = port.parse::<u16>().ok()?;
+        return Some((host.to_string(), port));
     }
+
+    if input.matches(':').count() == 1 {
+        let (host, port) = input.rsplit_once(':')?;
+        let port = port.parse::<u16>().ok()?;
+        return Some((host.to_string(), port));
+    }
+    None
+}
+
+async fn resolve_seeder(seeder: &str, default_port: u16) -> Option<NetAddress> {
+    let (host, port) =
+        split_host_port(seeder).unwrap_or_else(|| (seeder.to_string(), default_port));
 
     if let Ok(ip) = host.parse::<IpAddr>() {
         return Some(NetAddress::new(ip, port));
