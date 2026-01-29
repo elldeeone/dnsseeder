@@ -10,6 +10,7 @@ use protobuf::Message;
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
+#[cfg(test)]
 use std::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(test)]
