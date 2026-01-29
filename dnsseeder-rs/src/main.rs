@@ -6,6 +6,7 @@ mod grpc;
 mod logging;
 mod manager;
 mod netadapter;
+mod profiling;
 mod types;
 mod version;
 
@@ -45,9 +46,11 @@ async fn run() -> Result<(), String> {
     logging::init(cfg.no_log_files, &cfg.log_level, &log_file, &err_log_file)?;
     info!("Version {}", version::version());
 
-    if !cfg.profile.is_empty() {
-        warn!("--profile is not supported in the Rust implementation");
-    }
+    let profile_server = if !cfg.profile.is_empty() {
+        Some(profiling::start(&cfg.profile).await?)
+    } else {
+        None
+    };
 
     set_active_config(cfg.clone())?;
     let default_port: u16 = cfg
@@ -134,6 +137,9 @@ async fn run() -> Result<(), String> {
     SYSTEM_SHUTDOWN.store(true, Ordering::Relaxed);
     let _ = shutdown_tx.send(true);
     manager.shutdown().await;
+    if let Some(server) = profile_server {
+        server.stop().await;
+    }
     grpc_server.stop().await;
     if let Some(handle) = creep_handle {
         let _ = handle.await;
